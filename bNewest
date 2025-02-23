@@ -1,0 +1,134 @@
+-- ✅ **Function Forward Declarations**
+local moveTo, savePosition, returnToLastPosition, restock, placeBlock, buildSchematic, refuelTurtle
+
+-- ✅ **Restore Disk Startup for Future Turtles**
+if peripheral.find("drive") then
+    print("🔄 Restoring disk startup...")
+    if fs.exists("/disk/startuptemp.lua") then
+        shell.run("mv /disk/startuptemp.lua /disk/startup.lua")
+        print("✅ Disk startup restored.")
+    end
+end
+
+-- ✅ **Wait for Rednet ID**
+rednet.open("right")
+local _, turtleID = rednet.receive("turtle_id")
+if not turtleID then
+    print("❌ ERROR: No Turtle ID received!")
+    return
+end
+
+print("✅ Received Turtle ID:", turtleID)
+
+-- ✅ **Refuel Before Moving**
+for i = 1, 16 do
+    if turtle.getItemCount(i) > 0 then
+        turtle.select(i)
+        if turtle.refuel(1) then
+            print("⛽ Refueled with 1 Aeternus Fuel Block.")
+            break
+        end
+    end
+end
+
+-- ✅ **Move Forward One Block**
+if turtle.forward() then
+    print("✅ Moved forward one block.")
+else
+    print("❌ ERROR: Failed to move forward!")
+    return
+end
+
+-- ✅ **Send Confirmation to Placer Turtle**
+rednet.open("right")
+rednet.broadcast("moved", "turtle_status")
+rednet.close("right")
+
+-- ✅ **Download Block Data**
+local dataURL = "https://raw.githubusercontent.com/robertjojo123/olympus2/main/output_" .. turtleID .. ".lua"
+
+print("🌐 Downloading block data from", dataURL)
+shell.run("wget " .. dataURL .. " output.lua")
+
+if not fs.exists("output.lua") then
+    print("❌ Failed to download block data. Exiting.")
+    return
+end
+
+print("🔄 Loading block data...")
+local blocks = dofile("output.lua")
+
+-- ✅ **Position Tracking**
+local pos = {x = 0, y = 0, z = 0, dir = 0}
+local lastPos = {x = 0, y = 0, z = 0, dir = 0}
+
+-- ✅ **Save and Return to Position**
+savePosition = function()
+    lastPos = {x = pos.x, y = pos.y, z = pos.z, dir = pos.dir}
+end
+
+returnToLastPosition = function()
+    moveTo(lastPos)
+    while pos.dir ~= lastPos.dir do turnRight() end
+end
+
+-- ✅ **Movement Functions**
+local function turnLeft() turtle.turnLeft(); pos.dir = (pos.dir - 1) % 4 end
+local function turnRight() turtle.turnRight(); pos.dir = (pos.dir + 1) % 4 end
+
+moveTo = function(target)
+    while pos.x ~= target.x do
+        if pos.x < target.x then while pos.dir ~= 1 do turnRight() end
+        else while pos.dir ~= 3 do turnRight() end
+        end
+        turtle.forward()
+    end
+    while pos.z ~= target.z do
+        if pos.z < target.z then while pos.dir ~= 0 do turnRight() end
+        else while pos.dir ~= 2 do turnRight() end
+        end
+        turtle.forward()
+    end
+end
+
+-- ✅ **Restock Function**
+restock = function(block)
+    print("🔄 Restocking " .. block)
+end
+
+-- ✅ **Updated Place Block Function (Skips Existing Blocks)**
+placeBlock = function(block)
+    local exists, _ = turtle.inspectDown()
+    if exists then
+        print("⏭ Block already exists, skipping...")
+        return true
+    end
+
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and item.name == "minecraft:" .. block then
+            turtle.select(i)
+            if turtle.placeDown() then
+                print("✅ Placed", block)
+                return true
+            end
+        end
+    end
+
+    print("❌ Out of", block, "restocking...")
+    if restock(block) then return placeBlock(block) end
+    return false
+end
+
+-- ✅ **Build Process**
+buildSchematic = function()
+    print("🏗 Starting build process...")
+    for _, blockData in ipairs(blocks) do
+        moveTo(blockData)
+        placeBlock(blockData[1])
+    end
+    print("✅ Build complete!")
+end
+
+-- ✅ **Start Building**
+buildSchematic()
