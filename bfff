@@ -1,0 +1,167 @@
+-- ✅ **Function Forward Declarations**
+local moveTo, saveProgress, loadProgress, placeBlock, buildSchematic, restock, refuelTurtle
+
+-- ✅ **Restore Disk Startup for Future Turtles**
+if peripheral.find("drive") then
+    print("🔄 Restoring disk startup...")
+    if fs.exists("/disk/startuptemp.lua") then
+        shell.run("mv /disk/startuptemp.lua /disk/startup.lua")
+        print("✅ Disk startup restored.")
+    end
+end
+
+-- ✅ **Load Progress or Set Default Start Position**
+local function loadProgress()
+    if fs.exists("progress.txt") then
+        local file = fs.open("progress.txt", "r")
+        local data = textutils.unserialize(file.readAll())  
+        file.close()
+        if data and data.index and data.pos then
+            print("🔄 Resuming from saved position:", data.pos.x, data.pos.y, data.pos.z)
+            return data.index, data.pos
+        end
+    end
+    return 1, {x = 0, y = 0, z = -5, dir = 0}
+end
+
+-- ✅ **Save Progress Function**
+local function saveProgress(index, position)
+    local file = fs.open("progress.txt", "w")
+    file.write(textutils.serialize({index = index, pos = position}))
+    file.close()
+end
+
+-- ✅ **Set Starting Position**
+local buildIndex, pos = loadProgress()
+
+if buildIndex == 1 then
+    rednet.open("right")
+    local _, turtleID = rednet.receive("turtle_id")
+    if not turtleID then return end
+
+    print("✅ Received Turtle ID:", turtleID)
+
+    -- ✅ **Refuel Once at Startup**
+    for i = 1, 16 do
+        if turtle.getItemCount(i) > 0 then
+            turtle.select(i)
+            if turtle.refuel(1) then
+                print("⛽ Refueled with 1 Aeternus Fuel Block.")
+                break
+            end
+        end
+    end
+
+    -- ✅ **Send Confirmation to Placer Turtle**
+    rednet.broadcast("moved", "turtle_status")
+    rednet.close("right")
+
+    -- ✅ **Check for Block Data & Download if Needed**
+    if not fs.exists("output.lua") then
+        print("🌐 Block data not found! Downloading...")
+        local dataURL = "https://raw.githubusercontent.com/robertjojo123/limpy3/main/output_" .. turtleID .. ".lua"
+        shell.run("wget " .. dataURL .. " output.lua")
+
+        if not fs.exists("output.lua") then
+            print("❌ Failed to download block data. Exiting.")
+            return
+        end
+    end
+end
+
+print("🔄 Loading block data...")
+local blocks = dofile("output.lua")
+
+-- ✅ **Movement System**
+local function turnLeft() turtle.turnLeft(); pos.dir = (pos.dir - 1) % 4 end
+local function turnRight() turtle.turnRight(); pos.dir = (pos.dir + 1) % 4 end
+
+moveTo = function(target)
+    while pos.x ~= target.x do
+        if pos.x < target.x then while pos.dir ~= 1 do turnRight() end
+        else while pos.dir ~= 3 do turnRight() end
+        end
+        while not turtle.forward() do
+            print("🚧 Block ahead! Trying alternative path...")
+            turtle.turnRight()
+            if not turtle.forward() then
+                turtle.turnLeft()
+            end
+        end
+        pos.x = target.x  
+    end
+
+    while pos.z ~= target.z do
+        if pos.z < target.z then while pos.dir ~= 0 do turnRight() end
+        else while pos.dir ~= 2 do turnRight() end
+        end
+        while not turtle.forward() do
+            print("🚧 Block ahead! Trying alternative path...")
+            turtle.turnRight()
+            if not turtle.forward() then
+                turtle.turnLeft()
+            end
+        end
+        pos.z = target.z  
+    end
+end
+
+-- ✅ **Refuel Function (Ensures Fuel Supply)**
+refuelTurtle = function()
+    print("⛽ Checking fuel level...")
+    if turtle.getFuelLevel() >= 1000 then return true end 
+
+    print("⛽ Attempting to refuel...")
+    for i = 1, 16 do
+        turtle.select(i)
+        if turtle.refuel(1) then
+            print("✅ Refueled successfully!")
+            return true
+        end
+    end
+
+    print("❌ No fuel found in inventory!")
+    return false
+end
+
+-- ✅ **Updated Place Block Function**
+placeBlock = function(block)
+    if not refuelTurtle() then return false end 
+
+    local exists, _ = turtle.inspectDown()
+    if exists then
+        print("⏭ Block already exists, skipping...")
+        return true
+    end
+
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and item.name == "minecraft:" .. block then
+            turtle.select(i)
+            if turtle.placeDown() then
+                print("✅ Placed", block)
+                return true
+            end
+        end
+    end
+
+    print("❌ Out of", block, "restocking...")
+    if restock(block) then return placeBlock(block) end
+    return false
+end
+
+-- ✅ **Build Process**
+buildSchematic = function()
+    print("🏗 Starting build process...")
+    for _, blockData in ipairs(blocks) do
+        moveTo(blockData)
+
+        while not placeBlock(blockData[1]) do
+            print("🔄 Retrying placement of " .. blockData[1] .. " after restock")
+        end
+    end
+    print("✅ Build complete!")
+end
+
+-- ✅ **Start Building**
+buildSchematic()
