@@ -1,0 +1,132 @@
+-- ✅ Open Rednet on the Modem (Wireless Advanced Turtle Required)
+rednet.open("right") -- Adjust if the modem is on another side
+
+-- ✅ Forward Declare Functions
+local moveTo, placeBlock, fixBlockName, accessChest, restock, refuel, saveProgress, loadProgress, checkFuel
+
+-- ✅ Position Tracking
+local pos = {x = 0, y = 0, z = 0, dir = 0} -- 0 = +Z, 1 = +X, 2 = -Z, 3 = -X
+local lastPlacedIndex = 1 -- Tracks last placed block
+
+-- ✅ Material Chests (Stacked System)
+local materialChests = {
+    ["minecraft:stone"]  = {x = -1, y = 0, z = -2, dir = 3},
+    ["minecraft:wool"]   = {x = -1, y = 1, z = -2, dir = 3},
+    ["minecraft:wood"]   = {x = -1, y = 2, z = -2, dir = 3}
+}
+
+-- ✅ Fuel Chest & Fuel Item
+local fuelChest = {x = -1, y = 0, z = -1, dir = 3}
+local fuelItem = "projecte:aeternus_fuel_block"
+
+-- ✅ Ensure Block Data (Retrieve from Placer)
+if not fs.exists("output.lua") then
+    print("📡 Listening for Block Data Index from Placer Turtle...")
+    local blockDataIndex = nil
+    while not blockDataIndex do
+        local senderID, message, protocol = rednet.receive("BlockIndex", 10)
+        if message then
+            blockDataIndex = tonumber(message)
+            print("📂 Received Block Data Index:", blockDataIndex)
+            rednet.transmit(senderID, "BlockConfirm", "Received")
+        end
+    end
+    local url = "https://raw.githubusercontent.com/robertjojo123/olympus2/refs/heads/main/output_" .. blockDataIndex .. ".lua"
+    print("📥 Downloading `output_" .. blockDataIndex .. ".lua` as `output.lua`...")
+    shell.run("wget " .. url .. " output.lua")
+    if not fs.exists("output.lua") then os.shutdown() end
+end
+
+-- ✅ Load Block Data
+local blocks = dofile("output.lua")
+
+-- ✅ Move to Position
+moveTo = function(target)
+    while pos.x ~= target.x do
+        if pos.x < target.x then while pos.dir ~= 1 do turtle.turnRight() end
+        else while pos.dir ~= 3 do turtle.turnRight() end
+        end
+        turtle.forward()
+    end
+    while pos.z ~= target.z do
+        if pos.z < target.z then while pos.dir ~= 0 do turtle.turnRight() end
+        else while pos.dir ~= 2 do turtle.turnRight() end
+        end
+        turtle.forward()
+    end
+    while pos.y < target.y do turtle.up() end
+    while pos.y > target.y do turtle.down() end
+end
+
+-- ✅ Block Placement
+placeBlock = function(block)
+    block = fixBlockName(block)
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and item.name == block then
+            turtle.select(i)
+            if turtle.placeDown() then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- ✅ Restocking System
+restock = function(block)
+    block = fixBlockName(block)
+    if not materialChests[block] then return false end
+    return accessChest(materialChests[block])
+end
+
+-- ✅ Fuel Check & Refuel
+checkFuel = function()
+    if turtle.getFuelLevel() < 1000 then
+        print("⛽ Low Fuel! Moving to refuel...")
+        refuel()
+    end
+end
+
+refuel = function()
+    moveTo(fuelChest)
+    for _ = 1, 3 do
+        turtle.suck(1)
+        turtle.refuel()
+    end
+    print("✅ Refueled with 3 Aeternus Fuel Blocks!")
+end
+
+-- ✅ Save & Load Progress
+saveProgress = function()
+    local file = fs.open("progress.json", "w")
+    file.write(textutils.serialize({lastPlacedIndex = lastPlacedIndex}))
+    file.close()
+end
+
+loadProgress = function()
+    if fs.exists("progress.json") then
+        local file = fs.open("progress.json", "r")
+        local data = textutils.unserialize(file.readAll())
+        file.close()
+        lastPlacedIndex = data.lastPlacedIndex or 1
+    end
+end
+
+-- ✅ Build Process
+print("🚀 Starting Build Process...")
+loadProgress()
+
+for i = lastPlacedIndex, #blocks do
+    checkFuel()
+    moveTo(blocks[i])
+    while not placeBlock(blocks[i].block) do
+        print("🔄 Restocking:", blocks[i].block)
+        restock(blocks[i].block)
+    end
+    lastPlacedIndex = i
+    saveProgress()
+end
+
+print("✅ Build Process Completed. Shutting Down...")
+os.shutdown()
