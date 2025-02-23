@@ -1,0 +1,197 @@
+-- ✅ **Function Forward Declarations**
+local moveTo, saveProgress, loadProgress, placeBlock, buildSchematic, restock, refuelTurtle, findChestAccess
+
+-- ✅ **Restore Disk Startup for Future Turtles**
+if peripheral.find("drive") then
+    print("🔄 Restoring disk startup...")
+    if fs.exists("/disk/startuptemp.lua") then
+        shell.run("mv /disk/startuptemp.lua /disk/startup.lua")
+        print("✅ Disk startup restored.")
+    end
+end
+
+-- ✅ **Load Progress or Set Default Start Position**
+local function loadProgress()
+    if fs.exists("progress.txt") then
+        local file = fs.open("progress.txt", "r")
+        local data = textutils.unserialize(file.readAll())  
+        file.close()
+        if data and data.index and data.pos then
+            print("🔄 Resuming from saved position:", data.pos.x, data.pos.y, data.pos.z)
+            return data.index, data.pos
+        end
+    end
+    return 1, {x = 0, y = 0, z = -5, dir = 0}
+end
+
+-- ✅ **Save Progress Function**
+local function saveProgress(index, position)
+    local file = fs.open("progress.txt", "w")
+    file.write(textutils.serialize({index = index, pos = position}))
+    file.close()
+end
+
+-- ✅ **Stacked Material Chest Positions (-5x, y, 5z)**
+local materialChests = {
+    ["minecraft:wool"] = {x = -5, y = 1, z = 5, dir = 3},
+    ["minecraft:clay"] = {x = -5, y = 2, z = 5, dir = 3},
+    ["minecraft:dirt"] = {x = -5, y = 3, z = 5, dir = 3},
+    ["minecraft:grass"] = {x = -5, y = 4, z = 5, dir = 3},
+    ["minecraft:stone"] = {x = -5, y = 5, z = 5, dir = 3},
+    ["minecraft:log"] = {x = -5, y = 6, z = 5, dir = 3}
+}
+local fuelChest = {x = -5, y = 7, z = 5, dir = 3}
+
+-- ✅ **Set Starting Position**
+local buildIndex, pos = loadProgress()
+
+if buildIndex == 1 then
+    rednet.open("right")
+    local _, turtleID = rednet.receive("turtle_id")
+    if not turtleID then return end
+
+    print("✅ Received Turtle ID:", turtleID)
+
+    -- ✅ **Refuel Once at Startup**
+    for i = 1, 16 do
+        if turtle.getItemCount(i) > 0 then
+            turtle.select(i)
+            if turtle.refuel(1) then
+                print("⛽ Refueled with 1 Aeternus Fuel Block.")
+                break
+            end
+        end
+    end
+
+    -- ✅ **Send Confirmation to Placer Turtle**
+    rednet.broadcast("moved", "turtle_status")
+    rednet.close("right")
+
+    -- ✅ **Check for Block Data & Download if Needed**
+    if not fs.exists("output.lua") then
+        print("🌐 Block data not found! Downloading...")
+        local dataURL = "https://raw.githubusercontent.com/robertjojo123/limpy3/main/output_" .. turtleID .. ".lua"
+        shell.run("wget " .. dataURL .. " output.lua")
+
+        if not fs.exists("output.lua") then
+            print("❌ Failed to download block data. Exiting.")
+            return
+        end
+    end
+end
+
+print("🔄 Loading block data...")
+local blocks = dofile("output.lua")
+
+-- ✅ **Find an Open Access Spot for a Chest (Keeps Trying Until It Gets One)**
+findChestAccess = function(chestPos)
+    local possiblePositions = {
+        {x = chestPos.x + 1, z = chestPos.z, dir = 3},
+        {x = chestPos.x - 1, z = chestPos.z, dir = 1},
+        {x = chestPos.x, z = chestPos.z + 1, dir = 2},
+        {x = chestPos.x, z = chestPos.z - 1, dir = 0}
+    }
+
+    while true do
+        for _, pos in ipairs(possiblePositions) do
+            moveTo(pos)
+            if not turtle.detect() then
+                return pos
+            end
+            turtle.back()
+        end
+        print("⏳ All spots blocked. Retrying in 2 seconds...")
+        sleep(2)
+    end
+end
+
+-- ✅ **Refuel Function**
+refuelTurtle = function()
+    print("⛽ Checking fuel level...")
+    if turtle.getFuelLevel() >= 1000 then return true end 
+
+    print("🔄 Finding access point for fuel chest...")
+    local accessPoint = findChestAccess(fuelChest)
+
+    print("⛽ Moving to fuel chest at", accessPoint.x, accessPoint.z)
+    moveTo(accessPoint)
+    while pos.dir ~= accessPoint.dir do turnLeft() end
+
+    while true do
+        if turtle.suck(1) then
+            turtle.refuel()
+            print("✅ Refueled!")
+            return true
+        end
+        print("⏳ Fuel chest empty. Retrying in 2 seconds...")
+        sleep(2)
+    end
+end
+
+-- ✅ **Restock Function**
+restock = function(block)
+    local blockID = "minecraft:" .. block
+    local chestPos = materialChests[blockID]
+
+    if not chestPos then
+        print("❌ No chest found for " .. blockID)
+        return false
+    end
+
+    print("🔄 Finding access point for", blockID)
+    local accessPoint = findChestAccess(chestPos)
+
+    print("🔄 Moving to restock", blockID, "at", accessPoint.x, accessPoint.z)
+    moveTo(accessPoint)
+    while pos.dir ~= accessPoint.dir do turnLeft() end
+
+    while true do
+        if turtle.suck(64) then
+            print("✅ Restocked", blockID)
+            return true
+        end
+        print("⏳ No items in chest. Retrying in 2 seconds...")
+        sleep(2)
+    end
+end
+
+-- ✅ **Updated Place Block Function**
+placeBlock = function(block)
+    if not refuelTurtle() then return false end 
+
+    local exists, _ = turtle.inspectDown()
+    if exists then
+        print("⏭ Block already exists, skipping...")
+        return true
+    end
+
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and item.name == "minecraft:" .. block then
+            turtle.select(i)
+            if turtle.placeDown() then
+                print("✅ Placed", block)
+                return true
+            end
+        end
+    end
+
+    print("❌ Out of", block, "restocking...")
+    if restock(block) then return placeBlock(block) end
+    return false
+end
+
+-- ✅ **Start Build Process**
+buildSchematic = function()
+    print("🏗 Starting build process...")
+    for _, blockData in ipairs(blocks) do
+        moveTo(blockData)
+
+        while not placeBlock(blockData[1]) do
+            print("🔄 Retrying placement of " .. blockData[1] .. " after restock")
+        end
+    end
+    print("✅ Build complete!")
+end
+
+buildSchematic()
