@@ -1,0 +1,58 @@
+local rednetSide = "right"  -- Placer Turtle's Rednet Modem is on the right
+local turtleSlots = {1, 2, 3, 4}  -- Slots for Worker Turtles
+local fuelSlots = {5, 6, 7, 8}  -- Slots for Aeternus Fuel Blocks
+local turtleCount = 185  -- Total worker turtles
+local bootTime = 5  -- Estimated time to copy & reboot
+local currentTurtleSlot = 1  -- Track which slot to use
+local currentFuelSlot = 1  -- Track which fuel slot to use
+
+rednet.open(rednetSide)
+
+for i = 1, turtleCount do
+    -- Select the current turtle slot and place a worker turtle
+    turtle.select(turtleSlots[currentTurtleSlot])
+
+    if turtle.place() then
+        print("✅ Placed worker turtle #" .. i)
+
+        -- Cycle to the next turtle slot (1 → 2 → 3 → 4 → back to 1)
+        currentTurtleSlot = currentTurtleSlot % #turtleSlots + 1
+
+        -- Turn on the turtle (it will run startup from the disk)
+        peripheral.call("front", "turnOn")
+
+        -- ✅ **Give the new turtle ONLY one fuel block**
+        turtle.select(fuelSlots[currentFuelSlot])
+        if not turtle.drop(1) then  -- Drops exactly **one** Aeternus Fuel Block
+            print("❌ ERROR: Failed to drop fuel block!")
+        else
+            print("⛽ Gave 1 Aeternus Fuel Block to Turtle #" .. i)
+        end
+
+        -- Cycle to the next fuel slot (5 → 6 → 7 → 8 → back to 5)
+        currentFuelSlot = currentFuelSlot % #fuelSlots + 1
+
+        -- ✅ **Wait for startup.lua to copy build.lua and reboot**
+        print("⏳ Waiting " .. bootTime .. " seconds for reboot...")
+        sleep(bootTime)
+
+        -- ✅ **Send unique block data index to the new turtle**
+        print("📡 Sending Turtle ID #" .. i .. " via Rednet")
+        rednet.broadcast(i, "turtle_id")
+
+        -- ✅ **Wait for the turtle to confirm movement before placing the next one**
+        print("⏳ Waiting for worker to move...")
+        while turtle.detect() do
+            sleep(1)  -- Keep checking until the turtle moves
+        end
+
+        print("✅ Worker moved! Waiting 10 seconds before placing next turtle...")
+        sleep(10)
+
+    else
+        print("❌ Failed to place turtle #" .. i .. " (out of turtles?)")
+        break
+    end
+end
+
+print("✅ All worker turtles placed and initialized.")
