@@ -1,0 +1,37 @@
+local rednetSide = "right"  -- Placer Turtle's Rednet Modem is on the right
+local turtleCount = 122  -- Total worker turtles
+local bootTime = 5  -- Estimated time to copy & reboot
+
+rednet.open(rednetSide)
+
+for i = 1, turtleCount do
+    turtle.select(1) -- Ensure we're placing a turtle
+    if turtle.place() then
+        print("✅ Placed worker turtle #" .. i)
+
+        -- Turn on the turtle (it will run startup from the disk)
+        peripheral.call("front", "turnOn")
+
+        -- Wait for startup.lua to copy build.lua and reboot
+        print("⏳ Waiting " .. bootTime .. " seconds for reboot...")
+        sleep(bootTime)
+
+        -- Send unique block data index to the new turtle
+        print("📡 Sending Turtle ID #" .. i .. " via Rednet")
+        rednet.broadcast(i, "turtle_id")
+
+        -- Wait for confirmation that the turtle has moved before placing the next one
+        local moved = false
+        while not moved do
+            local _, message = rednet.receive("turtle_status", 10) -- Wait up to 10 seconds
+            if message == "moved" then
+                moved = true
+            end
+        end
+    else
+        print("❌ Failed to place turtle #" .. i)
+        break
+    end
+end
+
+print("✅ All worker turtles placed and initialized.")
