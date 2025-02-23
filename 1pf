@@ -1,0 +1,49 @@
+local rednetSide = "right"  -- Placer Turtle's Rednet Modem is on the right
+local turtleSlot = 1  -- Turtle placement slot
+local fuelSlot = 3  -- Fuel slot for Aeternus Fuel Blocks
+local turtleCount = 122  -- Total worker turtles
+local bootTime = 5  -- Estimated time to copy & reboot
+
+rednet.open(rednetSide)
+
+for i = 1, turtleCount do
+    turtle.select(turtleSlot)  -- Select the turtle slot
+
+    if turtle.place() then
+        print("✅ Placed worker turtle #" .. i)
+
+        -- Turn on the turtle (it will run startup from the disk)
+        peripheral.call("front", "turnOn")
+
+        -- Give the new turtle a fuel block
+        turtle.select(fuelSlot)
+        if not turtle.drop() then
+            print("❌ ERROR: Failed to drop fuel block!")
+        else
+            print("⛽ Gave Aeternus Fuel Block to Turtle #" .. i)
+        end
+
+        -- Wait for startup.lua to copy build.lua and reboot
+        print("⏳ Waiting " .. bootTime .. " seconds for reboot...")
+        sleep(bootTime)
+
+        -- Send unique block data index to the new turtle
+        print("📡 Sending Turtle ID #" .. i .. " via Rednet")
+        rednet.broadcast(i, "turtle_id")
+
+        -- Wait for the turtle to confirm it has moved before placing the next one
+        local moved = false
+        while not moved do
+            local senderId, message = rednet.receive("turtle_status", 10) -- Wait up to 10 seconds
+            if message == "moved" then
+                moved = true
+                print("✅ Turtle #" .. i .. " confirmed movement.")
+            end
+        end
+    else
+        print("❌ Failed to place turtle #" .. i)
+        break
+    end
+end
+
+print("✅ All worker turtles placed and initialized.")
