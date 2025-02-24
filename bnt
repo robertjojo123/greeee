@@ -1,0 +1,176 @@
+-- ✅ **Function Forward Declarations**
+local moveTo, saveProgress, loadProgress, placeBlock, buildSchematic, restock, refuelTurtle, findChestAccess
+
+-- ✅ **Restore Disk Startup for Future Turtles**
+if peripheral.find("drive") then
+    print("🔄 Restoring disk startup...")
+    if fs.exists("/disk/startuptemp.lua") then
+        shell.run("mv /disk/startuptemp.lua /disk/startup.lua")
+        print("✅ Disk startup restored.")
+    end
+end
+
+-- ✅ **Load Progress or Set Default Start Position**
+local function loadProgress()
+    if fs.exists("progress.txt") then
+        local file = fs.open("progress.txt", "r")
+        local data = textutils.unserialize(file.readAll())  
+        file.close()
+        if data and data.index and data.pos then
+            print("🔄 Resuming from saved position:", data.pos.x, data.pos.y, data.pos.z)
+            return data.index, data.pos
+        end
+    end
+    return 1, {x = 0, y = 0, z = -5, dir = 0}
+end
+
+-- ✅ **Save Progress Function**
+local function saveProgress(index, position)
+    local file = fs.open("progress.txt", "w")
+    file.write(textutils.serialize({index = index, pos = position}))
+    file.close()
+end
+
+-- ✅ **Set Starting Position**
+local buildIndex, pos = loadProgress()
+
+if buildIndex == 1 then
+    rednet.open("right")
+    local _, turtleID = rednet.receive("turtle_id")
+    if not turtleID then return end
+
+    print("✅ Received Turtle ID:", turtleID)
+
+    -- ✅ **Refuel Once at Startup**
+    for i = 1, 16 do
+        if turtle.getItemCount(i) > 0 then
+            turtle.select(i)
+            if turtle.refuel(1) then
+                print("⛽ Refueled with 1 Aeternus Fuel Block.")
+                break
+            end
+        end
+    end
+
+    -- ✅ **Send Confirmation to Placer Turtle**
+    rednet.broadcast("moved", "turtle_status")
+    rednet.close("right")
+
+    -- ✅ **Check for Block Data & Download if Needed**
+    if not fs.exists("output.lua") then
+        print("🌐 Block data not found! Downloading...")
+        local dataURL = "https://raw.githubusercontent.com/robertjojo123/limpy3/main/output_" .. turtleID .. ".lua"
+        shell.run("wget " .. dataURL .. " output.lua")
+
+        if not fs.exists("output.lua") then
+            print("❌ Failed to download block data. Exiting.")
+            return
+        end
+    end
+end
+
+print("🔄 Loading block data...")
+local blocks = dofile("output.lua")
+
+-- ✅ **Find an Open Access Spot for a Chest**
+findChestAccess = function(chestPos)
+    local possiblePositions = {
+        {x = chestPos.x + 1, z = chestPos.z, dir = 3},
+        {x = chestPos.x - 1, z = chestPos.z, dir = 1},
+        {x = chestPos.x, z = chestPos.z + 1, dir = 2},
+        {x = chestPos.x, z = chestPos.z - 1, dir = 0}
+    }
+
+    while true do
+        for _, pos in ipairs(possiblePositions) do
+            moveTo(pos)
+            if not turtle.detect() then
+                return pos
+            end
+            turtle.back()
+        end
+        print("⏳ All spots blocked. Retrying in 2 seconds...")
+        sleep(2)
+    end
+end
+
+-- ✅ **Find Chest Level Based on Block Type**
+local function getChestYLevel(block)
+    local blockYLevels = {
+        ["wool"] = 1, ["stone"] = 2, ["sand"] = 3, ["dirt"] = 4, ["glass"] = 5,
+        ["oak_planks"] = 6, ["spruce_planks"] = 7, ["bricks"] = 8, ["quartz_block"] = 9
+    }
+    return blockYLevels[block] or 10  -- Default to highest chest if block isn't listed
+end
+
+-- ✅ **Restock Function for Specific Block**
+restock = function(block)
+    local blockID = "minecraft:" .. block  
+    local chestY = getChestYLevel(block)  
+    local chestPos = {x = 5, y = chestY, z = -5}
+
+    print("🔄 Finding access point for", blockID)
+    local accessPoint = findChestAccess(chestPos)
+
+    print("🔄 Moving to restock", blockID, "at", accessPoint.x, accessPoint.z)
+    moveTo(accessPoint)
+    while pos.dir ~= accessPoint.dir do turnLeft() end
+
+    if turtle.suck(64) then
+        print("✅ Restocked", blockID)
+        return true
+    else
+        print("❌ No", blockID, "available! Waiting for resupply...")
+        while not turtle.suck(64) do
+            print("⏳ Waiting for more", blockID, "in chest...")
+            sleep(2)
+        end
+        print("✅ Finally restocked", blockID)
+        return true
+    end
+end
+
+-- ✅ **Updated Place Block Function**
+placeBlock = function(block)
+    local blockID = "minecraft:" .. block  
+    if not refuelTurtle() then return false end 
+
+    local exists, _ = turtle.inspectDown()
+    if exists then
+        print("⏭ Block already exists, skipping...")
+        return true
+    end
+
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and item.name == blockID then
+            turtle.select(i)
+            if turtle.placeDown() then
+                print("✅ Placed", blockID)
+                return true
+            end
+        end
+    end
+
+    print("❌ Out of", blockID, "restocking...")
+    if restock(block) then return placeBlock(block) end
+    return false
+end
+
+-- ✅ **Start Build Process with Restocking**
+buildSchematic = function()
+    print("🏗 Starting build process...")
+    for _, blockData in ipairs(blocks) do
+        local x, y, z, block = blockData.x, blockData.y, blockData.z, blockData[1]
+        local blockID = "minecraft:" .. block  
+
+        moveTo({x = x, y = y, z = z})
+
+        while not placeBlock(block) do
+            print("🔄 Retrying placement of " .. blockID .. " after restock")
+        end
+    end
+    print("✅ Build complete!")
+end
+
+buildSchematic()
