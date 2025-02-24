@@ -1,0 +1,166 @@
+-- ✅ **Function Forward Declarations**
+local moveTo, saveProgress, loadProgress, placeBlock, buildSchematic, restock, refuelTurtle, findChestAccess
+
+-- ✅ **Movement System (FULLY RESTORED)**
+local function turnLeft() turtle.turnLeft(); pos.dir = (pos.dir - 1) % 4 end
+local function turnRight() turtle.turnRight(); pos.dir = (pos.dir + 1) % 4 end
+
+moveTo = function(target)
+    while pos.x ~= target.x do
+        if pos.x < target.x then while pos.dir ~= 1 do turnRight() end
+        else while pos.dir ~= 3 do turnRight() end
+        end
+        while not turtle.forward() do
+            print("🚧 Block ahead! Trying alternative path...")
+            turtle.turnRight()
+            if not turtle.forward() then
+                turtle.turnLeft()
+            end
+        end
+        pos.x = target.x  
+    end
+
+    while pos.z ~= target.z do
+        if pos.z < target.z then while pos.dir ~= 0 do turnRight() end
+        else while pos.dir ~= 2 do turnRight() end
+        end
+        while not turtle.forward() do
+            print("🚧 Block ahead! Trying alternative path...")
+            turtle.turnRight()
+            if not turtle.forward() then
+                turtle.turnLeft()
+            end
+        end
+        pos.z = target.z  
+    end
+
+    while pos.y ~= target.y do
+        if pos.y < target.y then
+            while not turtle.up() do
+                print("🚧 Can't go up, trying again...")
+                sleep(1)
+            end
+        else
+            while not turtle.down() do
+                print("🚧 Can't go down, trying again...")
+                sleep(1)
+            end
+        end
+        pos.y = target.y
+    end
+end
+
+-- ✅ **Find an Open Access Spot for a Chest**
+findChestAccess = function(chestPos)
+    local possiblePositions = {
+        {x = chestPos.x + 1, z = chestPos.z, dir = 3},
+        {x = chestPos.x - 1, z = chestPos.z, dir = 1},
+        {x = chestPos.x, z = chestPos.z + 1, dir = 2},
+        {x = chestPos.x, z = chestPos.z - 1, dir = 0}
+    }
+
+    while true do
+        for _, pos in ipairs(possiblePositions) do
+            moveTo(pos)
+            if not turtle.detect() then
+                return pos
+            end
+            turtle.back()
+        end
+        print("⏳ All spots blocked. Retrying in 2 seconds...")
+        sleep(2)
+    end
+end
+
+-- ✅ **Refuel Function (RESTORED)**
+refuelTurtle = function()
+    print("⛽ Checking fuel level...")
+    if turtle.getFuelLevel() >= 1000 then return true end 
+
+    print("🔄 Moving to fuel chest...")
+    moveTo({x = 5, y = 0, z = -5})  -- Fuel chest at lowest level
+    while pos.dir ~= 3 do turnLeft() end
+
+    while true do
+        if turtle.suck(1) then
+            turtle.refuel()
+            print("✅ Refueled!")
+            return true
+        end
+        print("⏳ Fuel chest empty. Retrying in 2 seconds...")
+        sleep(2)
+    end
+end
+
+-- ✅ **Restock Function for Specific Block**
+restock = function(block)
+    local blockID = "minecraft:" .. block  
+    local chestY = getChestYLevel(block)  
+    local chestPos = {x = 5, y = chestY, z = -5}
+
+    print("🔄 Finding access point for", blockID)
+    local accessPoint = findChestAccess(chestPos)
+
+    print("🔄 Moving to restock", blockID, "at", accessPoint.x, accessPoint.z)
+    moveTo(accessPoint)
+    while pos.dir ~= accessPoint.dir do turnLeft() end
+
+    if turtle.suck(64) then
+        print("✅ Restocked", blockID)
+        return true
+    else
+        print("❌ No", blockID, "available! Waiting for resupply...")
+        while not turtle.suck(64) do
+            print("⏳ Waiting for more", blockID, "in chest...")
+            sleep(2)
+        end
+        print("✅ Finally restocked", blockID)
+        return true
+    end
+end
+
+-- ✅ **Place Block Function (FULLY RESTORED)**
+placeBlock = function(block)
+    local blockID = "minecraft:" .. block  
+    if not refuelTurtle() then return false end 
+
+    local exists, _ = turtle.inspectDown()
+    if exists then
+        print("⏭ Block already exists, skipping...")
+        return true
+    end
+
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and item.name == blockID then
+            turtle.select(i)
+            if turtle.placeDown() then
+                print("✅ Placed", blockID)
+                return true
+            end
+        end
+    end
+
+    print("❌ Out of", blockID, "restocking...")
+    if restock(block) then return placeBlock(block) end
+    return false
+end
+
+-- ✅ **Start Build Process**
+buildSchematic = function()
+    print("🏗 Starting build process...")
+    for _, blockData in ipairs(blocks) do
+        local x, y, z, block = blockData.x, blockData.y, blockData.z, blockData[1]
+        local blockID = "minecraft:" .. block  
+
+        moveTo({x = x, y = y, z = z})
+
+        while not placeBlock(block) do
+            print("🔄 Retrying placement of " .. blockID .. " after restock")
+        end
+    end
+    print("✅ Build complete!")
+end
+
+-- ✅ **EVERYTHING IS NOW DEFINED BEFORE USE**
+buildSchematic()
